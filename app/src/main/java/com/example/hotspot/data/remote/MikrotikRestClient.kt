@@ -193,7 +193,7 @@ class MikrotikRestClient {
 
     private fun openConnection(url: URL, cfg: ConnectionConfig, method: String): HttpURLConnection {
         val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = method
+        setRequestMethod(conn, method)
         conn.connectTimeout = 8000
         conn.readTimeout = 8000
 
@@ -205,6 +205,25 @@ class MikrotikRestClient {
             trustAllCertificates(conn)
         }
         return conn
+    }
+
+    private fun setRequestMethod(conn: HttpURLConnection, method: String) {
+        if (method == "PATCH") {
+            try {
+                conn.requestMethod = "PATCH"
+            } catch (_: Exception) {
+                try {
+                    val field = HttpURLConnection::class.java.getDeclaredField("method")
+                    field.isAccessible = true
+                    field.set(conn, "PATCH")
+                } catch (_: Exception) {
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("X-HTTP-Method-Override", "PATCH")
+                }
+            }
+        } else {
+            conn.requestMethod = method
+        }
     }
 
     private fun checkResponse(conn: HttpURLConnection) {

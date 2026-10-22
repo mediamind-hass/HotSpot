@@ -24,28 +24,61 @@ class HotspotRepository(
         currentConfig = config
         when (config.connectionType) {
             ConnectionType.AUTO -> {
-                var socketError: Exception? = null
+                val errors = mutableListOf<String>()
+
+                // 1. Prova Socket API sulla porta configurata
                 try {
                     socketClient.connect(config)
                     resolvedType = ConnectionType.SOCKET_API
                     activeProtocolName = "Socket API (Porta ${config.port})"
                     return@withContext
                 } catch (e: Exception) {
-                    socketError = e
+                    errors.add("Socket API (${config.port}): ${e.localizedMessage}")
                 }
 
-                // Fallback a REST API
+                // 2. Se diversa, prova Socket API sulla porta standard 8728
+                if (config.port != 8728) {
+                    try {
+                        val stdSocketConfig = config.copy(port = 8728)
+                        socketClient.connect(stdSocketConfig)
+                        currentConfig = stdSocketConfig
+                        resolvedType = ConnectionType.SOCKET_API
+                        activeProtocolName = "Socket API (Porta 8728)"
+                        return@withContext
+                    } catch (e: Exception) {
+                        errors.add("Socket API (8728): ${e.localizedMessage}")
+                    }
+                }
+
+                // 3. Prova REST API sulla porta configurata
                 try {
                     restClient.setConfig(config)
                     restClient.testConnection()
                     resolvedType = ConnectionType.REST_API
                     activeProtocolName = "REST API (Porta ${config.port})"
                     return@withContext
-                } catch (restErr: Exception) {
-                    val socketMsg = socketError?.localizedMessage ?: "Errore Socket"
-                    val restMsg = restErr.localizedMessage ?: "Errore REST"
-                    throw Exception("Impossibile connettersi a ${config.host}:${config.port}.\n\n• Provato Socket API: $socketMsg\n\n• Provato REST API: $restMsg")
+                } catch (e: Exception) {
+                    errors.add("REST API (${config.port}): ${e.localizedMessage}")
                 }
+
+                // 4. Se diversa, prova REST API sulla porta standard 80
+                if (config.port != 80) {
+                    try {
+                        val stdRestConfig = config.copy(port = 80)
+                        restClient.setConfig(stdRestConfig)
+                        restClient.testConnection()
+                        currentConfig = stdRestConfig
+                        resolvedType = ConnectionType.REST_API
+                        activeProtocolName = "REST API (Porta 80)"
+                        return@withContext
+                    } catch (e: Exception) {
+                        errors.add("REST API (80): ${e.localizedMessage}")
+                    }
+                }
+
+                // Genera messaggio di errore completo se tutte le combinazioni falliscono
+                val detailMsg = errors.joinToString("\n• ")
+                throw Exception("Impossibile connettersi a ${config.host}.\n\nI tentativi automatici hanno riscontrato:\n• $detailMsg")
             }
             ConnectionType.SOCKET_API -> {
                 resolvedType = ConnectionType.SOCKET_API

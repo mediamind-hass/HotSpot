@@ -1,5 +1,6 @@
 package com.example.hotspot.ui.components
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -86,21 +87,21 @@ fun ConnectionConfigDialog(
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(end = 6.dp)
-                        )
-                        Text(
-                            text = "Nota Emulatore: Se il MikroTik è sul tuo PC o in locale, usa 10.0.2.2 invece di 127.0.0.1.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                    Column(modifier = Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(end = 6.dp)
+                            )
+                            Text(
+                                text = "Consiglio Samsung / Android 14: Se il Wi-Fi non ha Internet, disattiva temporaneamente i Dati Mobili (4G/5G).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
 
@@ -109,12 +110,37 @@ fun ConnectionConfigDialog(
                 OutlinedTextField(
                     value = portText,
                     onValueChange = { portText = it.filter { char -> char.isDigit() } },
-                    label = { Text("Porta API (Default 8278)") },
+                    label = { Text("Porta API (es. 8728, 80, 8278)") },
                     leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Porte standard:",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                    androidx.compose.material3.AssistChip(
+                        onClick = { portText = "8728" },
+                        label = { Text("8728 (Socket)") }
+                    )
+                    androidx.compose.material3.AssistChip(
+                        onClick = { portText = "80" },
+                        label = { Text("80 (REST)") }
+                    )
+                    androidx.compose.material3.AssistChip(
+                        onClick = { portText = "8278" },
+                        label = { Text("8278") }
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(8.dp))
 

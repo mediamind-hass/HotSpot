@@ -54,6 +54,7 @@ class HotspotViewModel(application: Application) : AndroidViewModel(application)
 
     fun connect(config: ConnectionConfig = _uiState.value.config) {
         viewModelScope.launch {
+            com.example.hotspot.util.NetworkUtils.forceWifiNetwork(getApplication())
             prefs.saveConfig(config)
             _uiState.update {
                 it.copy(

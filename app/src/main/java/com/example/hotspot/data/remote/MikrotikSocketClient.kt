@@ -13,20 +13,27 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.security.MessageDigest
+import java.security.SecureRandom
+import java.security.cert.X509Certificate
+import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocketFactory
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
 
 class MikrotikSocketClient {
 
     private var socket: Socket? = null
     private var inputStream: DataInputStream? = null
     private var outputStream: DataOutputStream? = null
+    private var lastConfig: ConnectionConfig? = null
 
     @Synchronized
     fun connect(config: ConnectionConfig, timeoutMs: Int = 6000) {
         close()
+        lastConfig = config
         try {
             val rawSocket = if (config.useSsl) {
-                SSLSocketFactory.getDefault().createSocket()
+                createTrustAllSslSocketFactory().createSocket()
             } else {
                 Socket()
             }
@@ -69,6 +76,41 @@ class MikrotikSocketClient {
 
     fun isConnected(): Boolean {
         return socket?.isConnected == true && socket?.isClosed == false
+    }
+
+    @Synchronized
+    private fun <T> executeWithRetry(block: () -> T): T {
+        return try {
+            if (!isConnected()) {
+                val cfg = lastConfig ?: throw Exception("Socket non connesso")
+                connect(cfg)
+            }
+            block()
+        } catch (e: Exception) {
+            if (isSocketClosedException(e)) {
+                close()
+                val cfg = lastConfig
+                if (cfg != null) {
+                    try {
+                        connect(cfg)
+                        return block()
+                    } catch (_: Exception) {
+                        throw e
+                    }
+                }
+            }
+            throw e
+        }
+    }
+
+    private fun isSocketClosedException(e: Exception): Boolean {
+        val msg = e.localizedMessage?.lowercase() ?: ""
+        return e is java.net.SocketException ||
+               e is java.io.IOException ||
+               msg.contains("broken pipe") ||
+               msg.contains("socket closed") ||
+               msg.contains("connection abort") ||
+               msg.contains("reset by peer")
     }
 
     private fun login(username: String, password: String) {
@@ -116,7 +158,7 @@ class MikrotikSocketClient {
         }
     }
 
-    fun fetchUsers(): List<HotspotUser> {
+    fun fetchUsers(): List<HotspotUser> = executeWithRetry {
         sendSentence("/ip/hotspot/user/print")
         val sentences = readAllSentencesUntilDone()
         val users = mutableListOf<HotspotUser>()
@@ -142,10 +184,10 @@ class MikrotikSocketClient {
                 )
             }
         }
-        return users
+        users
     }
 
-    fun fetchProfiles(): List<HotspotProfile> {
+    fun fetchProfiles(): List<HotspotProfile> = executeWithRetry {
         sendSentence("/ip/hotspot/user/profile/print")
         val sentences = readAllSentencesUntilDone()
         val profiles = mutableListOf<HotspotProfile>()
@@ -166,10 +208,10 @@ class MikrotikSocketClient {
         if (profiles.isEmpty()) {
             profiles.add(HotspotProfile(id = "*0", name = "default"))
         }
-        return profiles
+        profiles
     }
 
-    fun addUser(user: HotspotUser) {
+    fun addUser(user: HotspotUser) = executeWithRetry {
         val words = mutableListOf(
             "/ip/hotspot/user/add",
             "=name=${user.name}",
@@ -183,17 +225,14 @@ class MikrotikSocketClient {
         if (user.limitBytesTotal > 0) words.add("=limit-bytes-total=${user.limitBytesTotal}")
 
         sendSentence(*words.toTypedArray())
-        val response = readSentence()
-        if (response.firstOrNull() == "!trap") {
-            val map = parseWordsToMap(response)
-            throw Exception(map["message"] ?: "Impossibile creare l'utente hotspot")
-        }
+        readAllSentencesUntilDone()
     }
 
-    fun updateUser(user: HotspotUser) {
+    fun updateUser(user: HotspotUser) = executeWithRetry {
+        val userIdentifier = if (user.id.isNotBlank()) "=.id=${user.id}" else "=numbers=${user.name}"
         val words = mutableListOf(
             "/ip/hotspot/user/set",
-            "=.id=${user.id}",
+            userIdentifier,
             "=name=${user.name}",
             "=password=${user.password}",
             "=profile=${user.profile}",
@@ -205,29 +244,19 @@ class MikrotikSocketClient {
         if (user.limitBytesTotal >= 0) words.add("=limit-bytes-total=${user.limitBytesTotal}")
 
         sendSentence(*words.toTypedArray())
-        val response = readSentence()
-        if (response.firstOrNull() == "!trap") {
-            val map = parseWordsToMap(response)
-            throw Exception(map["message"] ?: "Impossibile aggiornare l'utente hotspot")
-        }
+        readAllSentencesUntilDone()
     }
 
-    fun deleteUser(id: String) {
-        sendSentence("/ip/hotspot/user/remove", "=.id=$id")
-        val response = readSentence()
-        if (response.firstOrNull() == "!trap") {
-            val map = parseWordsToMap(response)
-            throw Exception(map["message"] ?: "Impossibile eliminare l'utente hotspot")
-        }
+    fun deleteUser(id: String) = executeWithRetry {
+        val userIdentifier = if (id.startsWith("*") || id.isNotBlank()) "=.id=$id" else "=numbers=$id"
+        sendSentence("/ip/hotspot/user/remove", userIdentifier)
+        readAllSentencesUntilDone()
     }
 
-    fun setUserDisabled(id: String, disabled: Boolean) {
-        sendSentence("/ip/hotspot/user/set", "=.id=$id", "=disabled=${if (disabled) "true" else "false"}")
-        val response = readSentence()
-        if (response.firstOrNull() == "!trap") {
-            val map = parseWordsToMap(response)
-            throw Exception(map["message"] ?: "Impossibile cambiare lo stato dell'utente")
-        }
+    fun setUserDisabled(id: String, disabled: Boolean) = executeWithRetry {
+        val userIdentifier = if (id.startsWith("*") || id.isNotBlank()) "=.id=$id" else "=numbers=$id"
+        sendSentence("/ip/hotspot/user/set", userIdentifier, "=disabled=${if (disabled) "true" else "false"}")
+        readAllSentencesUntilDone()
     }
 
     // Protocol Encoding/Decoding
@@ -365,5 +394,16 @@ class MikrotikSocketClient {
             i += 2
         }
         return data
+    }
+
+    private fun createTrustAllSslSocketFactory(): SSLSocketFactory {
+        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
+        })
+        val sc = SSLContext.getInstance("TLS")
+        sc.init(null, trustAllCerts, SecureRandom())
+        return sc.socketFactory
     }
 }

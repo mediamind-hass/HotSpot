@@ -114,13 +114,23 @@ com.example.hotspot
    Inserisci l'indirizzo IP locale della MikroTik (es. `192.168.88.1`) e la porta `8278`.
 2. **Emulatore Android Studio**:
    Se stai testando l'app sull'emulatore Android per connetterti alla MikroTik sulla rete locale del tuo PC, utilizza l'IP **`10.0.2.2`** anziché `127.0.0.1`.
-3. **Configurazione MikroTik**:
-   Assicurati che il servizio API o WWW sia attivo sulla porta 8278:
-   ```routeros
-   /ip service set api port=8278 disabled=no
-   # oppur per la REST API di RouterOS v7:
-   /ip service set www port=8278 disabled=no
-   ```
+3. **Configurazione MikroTik e Porte Standard**:
+   - **Socket API**: Porta default **`8728`** (o personalizzata es. `8278`).
+   - **REST API (RouterOS v7)**: Porta default **`80`** o **`8080`**.
+   - Assicurati che il servizio sia attivo in RouterOS:
+     ```routeros
+     /ip service set api port=8728 disabled=no
+     # oppure per REST API su RouterOS v7:
+     /ip service set www port=80 disabled=no
+     ```
+
+4. **Risoluzione Problemi Connessione Samsung (es. Galaxy A15 / SM-A155F su Android 14)**:
+   - Se lo smartphone è connesso al Wi-Fi del MikroTik (senza connessione Internet convalidata), Android/One UI instrada il traffico verso la rete dati cellulare (4G/5G).
+   - L'applicazione forzerà automaticamente il binding del processo sull'interfaccia Wi-Fi via `ConnectivityManager`.
+   - Se riscontri ancora problemi:
+     - **Disattiva temporaneamente i Dati Mobili (4G/5G)** sullo smartphone durante la gestione del router.
+     - Verifica che nelle impostazioni Wi-Fi avanzate di Samsung non sia attivo il *"Passaggio a dati mobili automatica"*.
+     - Verifica che sulla rete Wi-Fi del MikroTik l'opzione `Default Forward` / Isolamento Client consenta la comunicazione con il gateway.
 
 ---
 
