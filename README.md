@@ -1,6 +1,6 @@
 # 📶 MikroTik HotSpot Manager (Android)
 
-Un'applicazione Android moderna scritta in **Kotlin** e **Jetpack Compose** (Material 3) per connettersi a router e antenne **MikroTik RouterOS** sulla **porta 8278** (o personalizzata) per gestire in tempo reale gli utenti dell'HotSpot.
+Un'applicazione Android moderna scritta in **Kotlin** e **Jetpack Compose** (Material 3) per connettersi a router e antenne **MikroTik RouterOS** (via Socket API binaria e REST API v7) per gestire in tempo reale gli utenti dell'HotSpot.
 
 ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
 ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
@@ -11,11 +11,13 @@ Un'applicazione Android moderna scritta in **Kotlin** e **Jetpack Compose** (Mat
 
 ## 🌟 Caratteristiche Principali
 
-- **🔌 Connessione Flessibile sulla Porta 8278**:
-  - Supporta sia la **Socket API binaria** sia la **REST API** di RouterOS v7.
-  - **Modalità Rilevamento Automatico (`AUTO`)**: Tenta la connessione via Socket API ed esegue il fallback automatico su REST API.
-  - **Connessione Automatica allo Start**: Si collega in automatico all'avvio con i parametri salvati.
-  - **Supporto SSL/TLS**: Possibilità di abilitare la cifratura SSL/TLS.
+- **🔌 Connessione Flessibile e Rilevamento Automatico (`AUTO`)**:
+  - Supporta sia la **Socket API binaria** (Porta `8728` / `8729` SSL / `8278`) sia la **REST API** di RouterOS v7 (Porta `80` / `443` HTTPS).
+  - **Modalità Rilevamento Automatico (`AUTO`)**: Prova intelligentemente e velocemente la porta personalizzata e le porte standard `80`, `8728`, `8729` (SSL) e `443` (HTTPS) con timeout ottimizzati.
+  - **Auto-Reconnect su "Broken Pipe"**: Gestione automatica della riconnessione trasparente in caso di timeout di inattività del socket sul router.
+  - **Compatibilità Estesa per Smartphone (Samsung One UI 6 / 7 / 9 / Android 14/15/16)**:
+    - Binding automatico e fallback ibrido sull'interfaccia Wi-Fi per reti locali senza connessione Internet.
+    - Sblocco dei vincoli sandbox per le chiamate HTTP/REST chiare e rilevamento preciso degli errori di autenticazione `HTTP 401`.
 - **👥 Gestione Completa Utenti HotSpot (CRUD)**:
   - 📖 **Lettura**: Elenco utenti con stato (*Attivo/Disabilitato*), profilo, tempo di utilizzo (*uptime*) e traffico dati.
   - ➕ **Creazione**: Inserimento nuovi utenti con Username, Password, Profilo, Server, Limite Tempo e Note.
@@ -36,17 +38,17 @@ L'applicazione segue i principi di **Modern Android Development (MAD)**:
 com.example.hotspot
 ├── data
 │   ├── local
-│   │   └── ConnectionPreferences.kt      # Salvataggio credenziali su SharedPreferences
+│   │   └── ConnectionPreferences.kt      # Salvataggio credenziali e porta attiva su SharedPreferences
 │   ├── model
-│   │   └── HotspotUser.kt                # Classi dati (HotspotUser, HotspotProfile, ConnectionConfig)
+│   │   └── HotspotUser.kt                # Classi dati e AuthenticationException
 │   ├── remote
-│   │   ├── MikrotikSocketClient.kt       # Client socket nativo protocollo API MikroTik
-│   │   └── MikrotikRestClient.kt         # Client HTTP/REST per RouterOS v7
+│   │   ├── MikrotikSocketClient.kt       # Client socket nativo protocollo API MikroTik con auto-retry
+│   │   └── MikrotikRestClient.kt         # Client HTTP/REST per RouterOS v7 con fix PATCH e SSL TrustAll
 │   └── repository
-│       └── HotspotRepository.kt          # Repository unico con gestione fallback AUTO
+│       └── HotspotRepository.kt          # Repository unico con fallback avanzato AUTO su porte standard
 ├── ui
 │   ├── components
-│   │   ├── ConnectionConfigDialog.kt     # Dialog configurazione IP/Porta/Auth
+│   │   ├── ConnectionConfigDialog.kt     # Dialog configurazione IP/Porta/Auth con chip porte veloci
 │   │   ├── DeleteConfirmDialog.kt        # Dialog conferma eliminazione
 │   │   ├── UserCard.kt                   # Componente UI card utente
 │   │   └── UserFormDialog.kt             # Dialog creazione/modifica utente
@@ -55,8 +57,10 @@ com.example.hotspot
 │   ├── theme
 │   │   ├── Color.kt, Theme.kt, Type.kt   # Temi Material 3
 │   └── viewmodel
-│       └── HotspotViewModel.kt           # Management dello Stato UI (StateFlow + Coroutines)
-└── MainActivity.kt                       # Activity di ingresso dell'applicazione
+│       └── HotspotViewModel.kt           # Gestione dello Stato UI (StateFlow + Coroutines + Routing Ibrido)
+├── util
+│   └── NetworkUtils.kt                   # Forzatura interfaccia Wi-Fi e gestione unbind per Android 14+
+└── MainActivity.kt                       # Activity principale con prompt autorizzazioni runtime
 ```
 
 ---
@@ -64,25 +68,18 @@ com.example.hotspot
 ### 🌐 Specifiche di Rete e Protocolli MikroTik
 
 #### 1. RouterOS Socket API (`MikrotikSocketClient.kt`)
-- Connessione diretta via `java.net.Socket` sulla porta configurata (Default `8278`).
-- **Codifica della lunghezza delle parole (*Sentence Length Encoding*)**:
-  - $L < 128$: 1 byte
-  - $L < 16384$: 2 byte (`0x80 | (L >> 8)`, `L & 0xFF`)
-  - $L < 2097152$: 3 byte (`0xC0 | (L >> 16)`, ...)
-  - $L < 268435456$: 4 byte (`0xE0 | (L >> 24)`, ...)
+- Connessione diretta via `java.net.Socket` sulla porta configurata (Standard `8728`, SSL `8729`, Custom `8278`).
+- **Gestione Trasparente "Broken Pipe" (`executeWithRetry`)**:
+  - Intercetta i socket chiusi dal router per inattività e riapre la connessione in ~50ms.
+  - Utilizza `readAllSentencesUntilDone()` per svuotare completamente il buffer del socket.
 - **Autenticazione**:
   - *RouterOS >= 6.43*: Login diretto con parametri `=name=` e `=password=`.
-  - *RouterOS legacy (< 6.43)*: Autenticazione a 2 fasi via challenge/response MD5 (`0x00 + password + challenge_hex`).
-- **Comandi eseguiti**:
-  - `/ip/hotspot/user/print`
-  - `/ip/hotspot/user/profile/print`
-  - `/ip/hotspot/user/add`
-  - `/ip/hotspot/user/set`
-  - `/ip/hotspot/user/remove`
+  - *RouterOS legacy (< 6.43)*: Challenge/Response MD5.
 
 #### 2. RouterOS v7 REST API (`MikrotikRestClient.kt`)
 - Protocollo HTTP/HTTPS con **Basic Auth** (`Authorization: Basic base64(user:pass)`).
-- Parsing payload JSON (`org.json.JSONObject` e `org.json.JSONArray`).
+- **Fix HTTP Method `PATCH`**: Bypass delle limitazioni di `HttpURLConnection` per l'aggiornamento/disabilitazione utenti.
+- **Riconoscimento HTTP 401**: Notifica istantanea in caso di credenziali invalide senza scartare la porta.
 - **Endpoint HTTP**:
   - `GET /rest/ip/hotspot/user`
   - `GET /rest/ip/hotspot/user/profile`
@@ -95,7 +92,8 @@ com.example.hotspot
 ## 💻 Requisiti di Sistema e Compilazione
 
 - **Min SDK**: `24` (Android 7.0 Nougat)
-- **Target SDK**: `37` (Android 15)
+- **Target SDK**: `35` (Android 15 / One UI 9 Compatible)
+- **Compile SDK**: `37`
 - **JDK**: Java 11 / 17
 - **Gradle**: Version Catalog (`libs.versions.toml`)
 
@@ -103,7 +101,10 @@ com.example.hotspot
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-<application android:usesCleartextTraffic="true" ... />
+<uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 ```
 
 ---
@@ -111,26 +112,19 @@ com.example.hotspot
 ## 💡 Guida alla Connessione
 
 1. **Rete Locale / Wi-Fi**:
-   Inserisci l'indirizzo IP locale della MikroTik (es. `192.168.88.1`) e la porta `8278`.
+   Inserisci l'indirizzo IP locale della MikroTik (es. `192.168.88.1` o `192.168.16.120`).
 2. **Emulatore Android Studio**:
-   Se stai testando l'app sull'emulatore Android per connetterti alla MikroTik sulla rete locale del tuo PC, utilizza l'IP **`10.0.2.2`** anziché `127.0.0.1`.
-3. **Configurazione MikroTik e Porte Standard**:
-   - **Socket API**: Porta default **`8728`** (o personalizzata es. `8278`).
-   - **REST API (RouterOS v7)**: Porta default **`80`** o **`8080`**.
-   - Assicurati che il servizio sia attivo in RouterOS:
-     ```routeros
-     /ip service set api port=8728 disabled=no
-     # oppure per REST API su RouterOS v7:
-     /ip service set www port=80 disabled=no
-     ```
-
-4. **Risoluzione Problemi Connessione Samsung (es. Galaxy A15 / SM-A155F su Android 14)**:
-   - Se lo smartphone è connesso al Wi-Fi del MikroTik (senza connessione Internet convalidata), Android/One UI instrada il traffico verso la rete dati cellulare (4G/5G).
-   - L'applicazione forzerà automaticamente il binding del processo sull'interfaccia Wi-Fi via `ConnectivityManager`.
-   - Se riscontri ancora problemi:
-     - **Disattiva temporaneamente i Dati Mobili (4G/5G)** sullo smartphone durante la gestione del router.
-     - Verifica che nelle impostazioni Wi-Fi avanzate di Samsung non sia attivo il *"Passaggio a dati mobili automatica"*.
-     - Verifica che sulla rete Wi-Fi del MikroTik l'opzione `Default Forward` / Isolamento Client consenta la comunicazione con il gateway.
+   Utilizza l'IP **`10.0.2.2`** per connetterti al router sulla rete del PC.
+3. **Porte Standard MikroTik**:
+   - **`80`**: REST API HTTP (Consigliata per RouterOS v7)
+   - **`8728`**: Socket API Plain
+   - **`8729`**: Socket API SSL
+   - **`8278`**: Porta personalizzata
+4. **Configurazione Servizi in RouterOS**:
+   ```routeros
+   /ip service set api port=8728 disabled=no
+   /ip service set www port=80 disabled=no
+   ```
 
 ---
 
@@ -144,8 +138,8 @@ cd HotSpot
 # Compila l'APK Debug
 ./gradlew assembleDebug
 
-# L'APK generato si troverà in:
-# app/build/outputs/apk/debug/app-debug.apk
+# Installa direttamente sul dispositivo collegato
+./gradlew :app:installDebug
 ```
 
 ---
