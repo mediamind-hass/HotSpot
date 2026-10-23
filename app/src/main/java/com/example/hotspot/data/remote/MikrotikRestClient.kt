@@ -1,6 +1,7 @@
 package com.example.hotspot.data.remote
 
 import android.util.Base64
+import com.example.hotspot.data.model.AuthenticationException
 import com.example.hotspot.data.model.ConnectionConfig
 import com.example.hotspot.data.model.HotspotProfile
 import com.example.hotspot.data.model.HotspotUser
@@ -26,14 +27,17 @@ class MikrotikRestClient {
         this.config = config
     }
 
-    fun testConnection(): Boolean {
+    fun testConnection(timeoutMs: Int = 6000): Boolean {
         val cfg = config ?: throw Exception("Configurazione non impostata")
         val url = URL("${getProtocol(cfg)}://${cfg.host}:${cfg.port}/rest/ip/hotspot/user")
-        val conn = openConnection(url, cfg, "GET")
+        val conn = openConnection(url, cfg, "GET", timeoutMs)
         try {
             val code = conn.responseCode
             if (code in 200..299) return true
             val errText = readStream(conn.errorStream ?: conn.inputStream)
+            if (code == 401) {
+                throw AuthenticationException("Credenziali errate (Username o Password non validi per MikroTik su porta ${cfg.port})")
+            }
             throw Exception("HTTP $code: $errText")
         } finally {
             conn.disconnect()
@@ -191,11 +195,12 @@ class MikrotikRestClient {
         }
     }
 
-    private fun openConnection(url: URL, cfg: ConnectionConfig, method: String): HttpURLConnection {
+    private fun openConnection(url: URL, cfg: ConnectionConfig, method: String, timeoutMs: Int = 6000): HttpURLConnection {
         val conn = url.openConnection() as HttpURLConnection
+        conn.instanceFollowRedirects = false
         setRequestMethod(conn, method)
-        conn.connectTimeout = 8000
-        conn.readTimeout = 8000
+        conn.connectTimeout = timeoutMs
+        conn.readTimeout = timeoutMs
 
         val credentials = "${cfg.username}:${cfg.password}"
         val authHeader = "Basic " + Base64.encodeToString(credentials.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
@@ -230,6 +235,9 @@ class MikrotikRestClient {
         val code = conn.responseCode
         if (code !in 200..299) {
             val errText = readStream(conn.errorStream ?: conn.inputStream)
+            if (code == 401) {
+                throw AuthenticationException("Credenziali errate (Username o Password non validi per MikroTik)")
+            }
             val msg = try {
                 val json = JSONObject(errText)
                 json.optString("detail", json.optString("message", errText))

@@ -9,6 +9,7 @@ import com.example.hotspot.data.model.ConnectionState
 import com.example.hotspot.data.model.HotspotProfile
 import com.example.hotspot.data.model.HotspotUser
 import com.example.hotspot.data.repository.HotspotRepository
+import com.example.hotspot.util.NetworkUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,7 +55,6 @@ class HotspotViewModel(application: Application) : AndroidViewModel(application)
 
     fun connect(config: ConnectionConfig = _uiState.value.config) {
         viewModelScope.launch {
-            com.example.hotspot.util.NetworkUtils.forceWifiNetwork(getApplication())
             prefs.saveConfig(config)
             _uiState.update {
                 it.copy(
@@ -64,28 +64,43 @@ class HotspotViewModel(application: Application) : AndroidViewModel(application)
                     showConfigDialog = false
                 )
             }
+
             try {
+                // Prova 1: Routing predefinito Android (velocissimo su One UI 9 / LAN standard / VPN / Dati)
+                NetworkUtils.unbindNetwork(getApplication())
                 repository.connect(config)
-                _uiState.update {
-                    it.copy(
-                        connectionState = ConnectionState.Connected(
-                            host = config.host,
-                            port = config.port,
-                            activeProtocol = repository.activeProtocolName
-                        ),
-                        userMessage = "Connesso a ${config.host}:${config.port} (${repository.activeProtocolName})"
-                    )
-                }
-                loadData()
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        connectionState = ConnectionState.Error(e.localizedMessage ?: "Errore di connessione"),
-                        isLoading = false,
-                        userMessage = e.localizedMessage
-                    )
+            } catch (_: Exception) {
+                // Prova 2: Se fallisce, forza l'interfaccia Wi-Fi specifica per reti HotSpot locali senza Internet
+                try {
+                    NetworkUtils.forceWifiNetwork(getApplication())
+                    repository.connect(config)
+                } catch (e2: Exception) {
+                    NetworkUtils.unbindNetwork(getApplication())
+                    _uiState.update {
+                        it.copy(
+                            connectionState = ConnectionState.Error(e2.localizedMessage ?: "Errore di connessione"),
+                            isLoading = false,
+                            userMessage = e2.localizedMessage
+                        )
+                    }
+                    return@launch
                 }
             }
+
+            val workingConfig = repository.effectiveConfig
+            prefs.saveConfig(workingConfig)
+            _uiState.update {
+                it.copy(
+                    config = workingConfig,
+                    connectionState = ConnectionState.Connected(
+                        host = workingConfig.host,
+                        port = workingConfig.port,
+                        activeProtocol = repository.activeProtocolName
+                    ),
+                    userMessage = "Connesso a ${workingConfig.host}:${workingConfig.port} (${repository.activeProtocolName})"
+                )
+            }
+            loadData()
         }
     }
 

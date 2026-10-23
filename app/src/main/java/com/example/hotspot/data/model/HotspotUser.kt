@@ -1,5 +1,7 @@
 package com.example.hotspot.data.model
 
+class AuthenticationException(message: String) : Exception(message)
+
 enum class ConnectionType {
     AUTO,
     SOCKET_API,

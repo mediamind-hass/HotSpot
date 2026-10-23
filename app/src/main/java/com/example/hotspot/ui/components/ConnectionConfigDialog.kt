@@ -133,6 +133,13 @@ fun ConnectionConfigDialog(
                         label = { Text("8728 (Socket)") }
                     )
                     androidx.compose.material3.AssistChip(
+                        onClick = {
+                            portText = "8729"
+                            useSsl = true
+                        },
+                        label = { Text("8729 (SSL)") }
+                    )
+                    androidx.compose.material3.AssistChip(
                         onClick = { portText = "80" },
                         label = { Text("80 (REST)") }
                     )

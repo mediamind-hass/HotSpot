@@ -11,29 +11,30 @@ object NetworkUtils {
 
     private const val TAG = "NetworkUtils"
 
+    var currentWifiNetwork: Network? = null
+        private set
+
     /**
-     * Forza il processo dell'app ad utilizzare l'interfaccia Wi-Fi per il traffico di rete.
-     * Risolve il problema su Samsung One UI (inclusa la One UI 9 / Android 15/16) in cui i Dati Mobili
-     * o la verifica di connettività scavalcano il Wi-Fi locale quando non ha ancora accesso a Internet.
+     * Tenta il binding del processo e cattura la rete Wi-Fi attiva per openConnection/socketFactory.
      */
     fun forceWifiNetwork(context: Context) {
         try {
             val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
-            // 1. Scansione di tutte le reti per trovare immediatamente l'interfaccia Wi-Fi
             @Suppress("DEPRECATION")
             val networks = cm.allNetworks
             for (network in networks) {
                 val caps = cm.getNetworkCapabilities(network) ?: continue
                 if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    cm.bindProcessToNetwork(network)
-                    Log.d(TAG, "Processo vincolato direttamente alla rete Wi-Fi: $network")
-                    break
+                    currentWifiNetwork = network
+                    try {
+                        cm.bindProcessToNetwork(network)
+                    } catch (_: Exception) {}
+                    Log.d(TAG, "Rete Wi-Fi catturata e vincolata: $network")
+                    return
                 }
             }
 
-            // 2. Richiesta specifica per il Wi-Fi RIMUOVENDO l'obbligo di NET_CAPABILITY_INTERNET.
-            // Questo è FONDAMENTALE su One UI 6/7/9 per consentire connessioni a reti locali senza Internet.
             val request = NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -42,15 +43,30 @@ object NetworkUtils {
             cm.requestNetwork(request, object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     try {
+                        currentWifiNetwork = network
                         cm.bindProcessToNetwork(network)
-                        Log.d(TAG, "Processo vincolato via callback alla rete Wi-Fi (Senza Internet): $network")
+                        Log.d(TAG, "Rete Wi-Fi catturata via callback: $network")
                     } catch (e: Exception) {
-                        Log.e(TAG, "Errore nel binding Wi-Fi via callback", e)
+                        Log.e(TAG, "Errore nel binding Wi-Fi", e)
                     }
                 }
             })
         } catch (e: Exception) {
             Log.e(TAG, "Errore nella forzatura rete Wi-Fi", e)
+        }
+    }
+
+    /**
+     * Ripristina il routing di rete predefinito di Android.
+     */
+    fun unbindNetwork(context: Context) {
+        try {
+            currentWifiNetwork = null
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.bindProcessToNetwork(null)
+            Log.d(TAG, "Ripristinato il routing di rete predefinito (unbind)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Errore durante unbind rete", e)
         }
     }
 }
